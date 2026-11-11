@@ -1,4 +1,4 @@
-/* Fungi Field Key, offline phone version: local store, v001 (10 November 2026, Session 6).
+/* Fungi Field Key, offline phone version: local store, v002 (11 November 2026, Session 6; v001 10 November): adds the Install button.
    Stands in for the claude.ai artifact runtime (db, user, assets, downloads) so the same app code runs
    from a static site without signal. Records and photographs stay in this browser's IndexedDB on the phone;
    nothing is sent anywhere. Also registers the service worker that keeps the guide and its photographs
@@ -95,12 +95,27 @@
     unexported: function(finds){ var m = lsGet('exported', {}); return (finds || []).filter(function(f){ return m[f.id] !== (f.updated || f.created || ''); }).length; },
     offline: off,
     statusHTML: function(finds){
-      var n = LOCAL.unexported(finds), out = '';
+      var n = LOCAL.unexported(finds), out = installHTML();
       if(n) out += '<div class="box warn local-exp">' + n + (n === 1 ? ' find' : ' finds') + ' not yet exported. Records are kept only on this phone until you export them.' + (location.hash === '#finds' ? '' : ' <a href="#finds">My finds</a>') + '</div>';
       if(off.state === 'caching') out += '<div class="box local-off">Saving the guide for use without signal: ' + off.done + ' of ' + off.total + ' photographs. Keep this page open.</div>';
       else if(off.state === 'error') out += '<div class="box warn local-off">Some photographs could not be saved for use without signal (' + off.done + ' of ' + off.total + '). Open the app again with signal to finish.</div>';
       return out; }
   };
+
+  /* ---------- Install button (v002) ---------- */
+  var deferred = null, standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  var ua = navigator.userAgent || '', isIOS = /iPhone|iPad|iPod/.test(ua), isAndroid = /Android/.test(ua), waited = false;
+  setTimeout(function(){ waited = true; rerender(); }, 3000);
+  window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); deferred = e; rerender(); });
+  window.addEventListener('appinstalled', function(){ deferred = null; standalone = true; rerender(); });
+  function installHTML(){
+    if(standalone || (location.hash && location.hash !== '#')) return '';
+    if(deferred) return '<div class="box local-inst"><button type="button" class="done" id="ffk-install">Install Fungi Key on this phone</button><p style="margin:8px 0 0">It then opens from its own icon and works without signal.</p></div>';
+    if(isIOS) return '<div class="box local-inst">To install on this iPhone: tap the Share button, then <b>Add to Home Screen</b>.</div>';
+    if(isAndroid && waited) return '<div class="box local-inst">To install: open this page in <b>Chrome</b> (from an email or message, tap the menu and choose Open in Chrome), then tap the Install button that appears here.</div>';
+    return ''; }
+  document.addEventListener('click', function(ev){ var b = ev.target && ev.target.closest && ev.target.closest('#ffk-install'); if(!b || !deferred) return;
+    var d = deferred; deferred = null; d.prompt(); (d.userChoice || Promise.resolve()).then(function(c){ if(c && c.outcome === 'accepted') standalone = true; rerender(); }); });
 
   if('serviceWorker' in navigator && location.protocol !== 'file:'){
     navigator.serviceWorker.addEventListener('message', function(ev){ var m = ev.data || {};
