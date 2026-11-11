@@ -1,4 +1,4 @@
-/* Fungi Field Key, offline phone version: local store, v002 (11 November 2026, Session 6; v001 10 November): adds the Install button.
+/* Fungi Field Key, offline phone version: local store, v003 (11 November 2026, Session 8): update check (menu button, automatic check on opening and on return to the app, reload prompt). v002 (11 November 2026, Session 6; v001 10 November): adds the Install button.
    Stands in for the claude.ai artifact runtime (db, user, assets, downloads) so the same app code runs
    from a static site without signal. Records and photographs stay in this browser's IndexedDB on the phone;
    nothing is sent anywhere. Also registers the service worker that keeps the guide and its photographs
@@ -87,14 +87,17 @@
   /* ---------- export tracking and offline status ---------- */
   function lsGet(k, d){ try{ var v = localStorage.getItem('fk:' + k); return v ? JSON.parse(v) : d; }catch(e){ return d; } }
   function lsSet(k, v){ try{ localStorage.setItem('fk:' + k, JSON.stringify(v)); }catch(e){} }
-  var off = {state: 'none', done: 0, total: 0};
+  var off = {state: 'none', done: 0, total: 0}, upd = {ready: false, msg: '', reg: null};
   function rerender(){ try{ if(typeof window.rr === 'function') window.rr(); }catch(e){} }
   var LOCAL = window.LOCAL = {
     url: function(id){ return urls[id] || ''; },
     markExported: function(finds){ var m = lsGet('exported', {}); finds.forEach(function(f){ m[f.id] = f.updated || f.created || ''; }); lsSet('exported', m); lsSet('lastExport', new Date().toISOString()); },
     unexported: function(finds){ var m = lsGet('exported', {}); return (finds || []).filter(function(f){ return m[f.id] !== (f.updated || f.created || ''); }).length; },
     offline: off,
+    updateHTML: function(){ return '<button type="button" class="mi" id="ffk-update">' + (upd.ready ? 'Load the new version' : 'Check for updates') + '</button>' + (upd.msg ? '<div class="ver">' + upd.msg + '</div>' : ''); },
+    statusHTML2: function(finds){ upd.skip = true; var r = LOCAL.statusHTML(finds); upd.skip = false; return r; },
     statusHTML: function(finds){
+      if(upd.ready && !upd.skip) return '<div class="box local-upd"><b>A new version has been downloaded.</b> <button type="button" class="done" id="ffk-reload">Load it now</button></div>' + LOCAL.statusHTML2(finds);
       var n = LOCAL.unexported(finds), out = installHTML();
       if(n) out += '<div class="box warn local-exp">' + n + (n === 1 ? ' find' : ' finds') + ' not yet exported. Records are kept only on this phone until you export them.' + (location.hash === '#finds' ? '' : ' <a href="#finds">My finds</a>') + '</div>';
       if(off.state === 'caching') out += '<div class="box local-off">Saving the guide for use without signal: ' + off.done + ' of ' + off.total + ' photographs. Keep this page open.</div>';
@@ -114,6 +117,16 @@
     if(isIOS) return '<div class="box local-inst">To install on this iPhone: tap the Share button, then <b>Add to Home Screen</b>.</div>';
     if(isAndroid && waited) return '<div class="box local-inst">To install: open this page in <b>Chrome</b> (from an email or message, tap the menu and choose Open in Chrome), then tap the Install button that appears here.</div>';
     return ''; }
+  document.addEventListener('click', function(ev){ var t = ev.target && ev.target.closest;
+    if(t && ev.target.closest('#ffk-reload')){ location.reload(); return; }
+    if(t && ev.target.closest('#ffk-update')){
+      if(upd.ready){ location.reload(); return; }
+      if(!upd.reg || !navigator.onLine){ upd.msg = navigator.onLine ? 'Update check not available here.' : 'No signal: try again with signal.'; rerender(); return; }
+      upd.msg = 'Checking...'; rerender();
+      upd.reg.update().then(function(){ setTimeout(function(){ if(!upd.ready){ upd.msg = (upd.reg.installing || upd.reg.waiting) ? 'Downloading the update...' : 'You have the latest version.'; rerender(); } }, 1500); })
+        .catch(function(){ upd.msg = 'Could not reach the site: try again with signal.'; rerender(); });
+      return; }
+  });
   document.addEventListener('click', function(ev){ var b = ev.target && ev.target.closest && ev.target.closest('#ffk-install'); if(!b || !deferred) return;
     var d = deferred; deferred = null; d.prompt(); (d.userChoice || Promise.resolve()).then(function(c){ if(c && c.outcome === 'accepted') standalone = true; rerender(); }); });
 
@@ -122,8 +135,11 @@
       if(m.type === 'img-progress'){ off.done = m.done; off.total = m.total; off.state = m.final ? (m.failed ? 'error' : 'ready') : 'caching';
         if(m.final || m.done % 25 === 0) rerender(); } });
     window.addEventListener('load', function(){
-      navigator.serviceWorker.register('sw.js').then(function(){ return navigator.serviceWorker.ready; })
+      var hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', function(){ if(!hadController){ hadController = true; return; } upd.ready = true; upd.msg = 'Update downloaded.'; rerender(); });
+      navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).then(function(r){ upd.reg = r; r.update().catch(function(){}); return navigator.serviceWorker.ready; })
         .then(function(reg){ if(reg.active) reg.active.postMessage({type: 'cache-images'}); }).catch(function(e){ console.error(e); });
+      document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'visible' && upd.reg) upd.reg.update().catch(function(){}); });
     });
   }
   if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function(){});
